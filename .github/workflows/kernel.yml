@@ -4,24 +4,24 @@ on: [push]
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-20.04
     steps:
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v3
     - name: Download apt-get dependencies
       run: |
         sudo env DEBIAN_FRONTEND=noninteractive apt-get -y purge unattended-upgrades
         sudo env DEBIAN_FRONTEND=noninteractive apt-get -y update
-        sudo env DEBIAN_FRONTEND=noninteractive apt-get -y install fakeroot \
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get -y install git fakeroot \
             libelf-dev libssl-dev flex bison coreutils build-essential \
-            xz-utils devscripts initramfs-tools wget linux-headers-5.8.0-50-generic
+            xz-utils devscripts initramfs-tools wget linux-headers-5.15.0-60-generic
     - name: Kernel config
       run: |
-        cp /usr/src/linux-headers-5.8.0-50-generic/.config .
+        cp /usr/src/linux-headers-5.15.0-60-generic/.config .
         scripts/config --disable DEBUG_INFO \
                        --set-str SYSTEM_TRUSTED_KEYS "" \
+                       --set-str CONFIG_SYSTEM_REVOCATION_KEYS "" \
+                       --set-val CONFIG_FRAME_WARN 0 \
                        --module CONFIG_TCP_CONG_PRAGUE \
                        --module CONFIG_TCP_CONG_BBR \
                        --module CONFIG_TCP_CONG_BBR2 \
@@ -53,19 +53,20 @@ jobs:
         mkdir -p debian_build
         mv -t debian_build ../linux-*.deb
     - name: Upload artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: prague-kernel
         path: debian_build
 
   release:
-    name: Release build artifacts for the testing branch
-    runs-on: ubuntu-latest
+    name: Release build artifacts for the branch
+    runs-on: ubuntu-20.04
     needs: build
-    if: github.ref == 'refs/heads/testing'
+    permissions: write-all
+    if: ${{ github.ref == 'refs/heads/testing' || github.ref == 'refs/heads/ratebase' || github.ref == 'refs/heads/mainline'}}
     steps:
     - name: Get artifact
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v3
       with:
         name: prague-kernel
     - name: Include iproute2 into the pre-release archive
@@ -73,12 +74,19 @@ jobs:
           wget https://github.com/L4STeam/iproute2/releases/download/master-build/iproute2-l4s.zip
           unzip iproute2-l4s
           mv -t . iproute2-l4s/*.deb
+    - name: Extract branch name
+      shell: bash
+      run: echo "branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+      id: extract_branch
     - name: Zip artifacts
-      run: zip -r l4s-testing.zip *.deb
+      run: |
+        mkdir debian_build
+        mv *.deb debian_build
+        zip -r l4s-${{ steps.extract_branch.outputs.branch }}.zip debian_build
     - name: Release tip build
-      uses: eine/tip@master
+      uses: pyTooling/Actions/releaser@main
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        tag: testing-build
+        tag: ${{ steps.extract_branch.outputs.branch }}-build
         files: |
-          l4s-testing.zip
+          l4s-${{ steps.extract_branch.outputs.branch }}.zip
