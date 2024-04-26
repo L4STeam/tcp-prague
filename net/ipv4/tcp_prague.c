@@ -563,6 +563,9 @@ static void prague_update_cwnd(struct sock *sk, const struct rate_sample *rs)
 		if (rs->ece_delta > acked)
 			LOG(sk, "Received %u marks for %lld acks at %u",
 			    rs->ece_delta, acked, tp->snd_una);
+		if (!ca->saw_ce) {
+			ca->frac_cwnd = (ca->frac_cwnd + 1U) >> 1;
+		}
 		ca->saw_ce = 1;
 		acked -= rs->ece_delta;
 	}
@@ -868,7 +871,8 @@ static void prague_init(struct sock *sk)
 	 * rate to use if net.ipv4.tcp_pace_iw is set.
 	 */
 	ca->alpha_stamp = tp->tcp_mstamp;
-	ca->upscaled_alpha = PRAGUE_MAX_ALPHA << PRAGUE_SHIFT_G;
+	ca->upscaled_alpha = 0;
+	//ca->upscaled_alpha = PRAGUE_MAX_ALPHA << PRAGUE_SHIFT_G;
 	ca->frac_cwnd = ((u64)tp->snd_cwnd << CWND_UNIT);
 	ca->max_tso_burst = 1;
 
@@ -906,7 +910,8 @@ static void prague_init(struct sock *sk)
 	ca->rest_depth_us = PRAGUE_INIT_MDEV_CARRY >> 1;
 
 	tp->classic_ecn = 0ULL;
-	tp->alpha = PRAGUE_MAX_ALPHA;		/* Used ONLY to log alpha */
+	tp->alpha = 0;
+	//tp->alpha = PRAGUE_MAX_ALPHA;		/* Used ONLY to log alpha */
 	ca->cwnd_mode = DEFAULT_MODE;
 	prague_new_round(sk);
 }
