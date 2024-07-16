@@ -396,7 +396,8 @@ static void tcp_accecn_echo_syn_ect(struct tcphdr *th, u8 ect)
 }
 
 static void
-tcp_ecn_make_synack(const struct request_sock *req, struct tcphdr *th)
+tcp_ecn_make_synack(struct sock *sk, const struct request_sock *req,
+		    struct tcphdr *th)
 {
 	if (req->num_retrans < 1 || req->num_timeout < 1) {
 		if (tcp_rsk(req)->accecn_ok)
@@ -407,6 +408,7 @@ tcp_ecn_make_synack(const struct request_sock *req, struct tcphdr *th)
 		th->ae  = 0;
 		th->cwr = 0;
 		th->ece = 0;
+		tcp_accecn_fail_mode_set(tcp_sk(sk), TCP_ACCECN_ACE_FAIL_SEND);
 	}
 }
 
@@ -439,7 +441,7 @@ static void tcp_ecn_send(struct sock *sk, struct sk_buff *skb,
 	if (!tcp_ecn_mode_any(tp))
 		return;
 
-	if (!tcp_accecn_ace_fail_recv(tp))
+	if (!tcp_accecn_ace_fail_send(tp) && !tcp_accecn_ace_fail_recv(tp))
 		/* The CCA could change the ECT codepoint on the fly, reset it*/
 		__INET_ECN_xmit(sk, tp->ecn_flags & TCP_ECN_ECT_1);
 	if (tcp_ecn_mode_accecn(tp)) {
@@ -3970,7 +3972,7 @@ struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
 	memset(th, 0, sizeof(struct tcphdr));
 	th->syn = 1;
 	th->ack = 1;
-	tcp_ecn_make_synack(req, th);
+	tcp_ecn_make_synack((struct sock *)sk, req, th);
 	th->source = htons(ireq->ir_num);
 	th->dest = ireq->ir_rmt_port;
 	skb->mark = ireq->ir_mark;
