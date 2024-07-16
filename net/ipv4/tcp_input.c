@@ -444,6 +444,21 @@ bool tcp_accecn_validate_syn_feedback(struct sock *sk, u8 ace, u8 sent_ect)
 	return true;
 }
 
+static void tcp_ecn_rcv_synack_accecn(struct tcp_sock *tp,
+				      const struct sk_buff *skb, u8 ip_dsfield)
+{
+	tcp_ecn_mode_set(tp, TCP_ECN_MODE_ACCECN);
+	tp->syn_ect_rcv = ip_dsfield & INET_ECN_MASK;
+	if (tp->rx_opt.accecn &&
+	    tp->saw_accecn_opt < TCP_ACCECN_OPT_COUNTER_SEEN) {
+		tp->saw_accecn_opt = tcp_accecn_option_init(skb,
+							    tp->rx_opt.accecn);
+		if (tp->saw_accecn_opt == TCP_ACCECN_OPT_FAIL_SEEN)
+			tcp_accecn_fail_mode_set(tp, TCP_ACCECN_OPT_FAIL_RECV);
+		tp->accecn_opt_demand = 2;
+	}
+}
+
 /* See Table 2 of the AccECN draft */
 static void tcp_ecn_rcv_synack(struct sock *sk, const struct sk_buff *skb,
 			       const struct tcphdr *th, u8 ip_dsfield)
@@ -457,29 +472,22 @@ static void tcp_ecn_rcv_synack(struct sock *sk, const struct sk_buff *skb,
 		tcp_ecn_mode_set(tp, TCP_ECN_DISABLED);
 		break;
 	case 0x1:
-	case 0x5:
 		if (tcp_ca_no_fallback_rfc3168(sk))
 			tcp_ecn_mode_set(tp, TCP_ECN_DISABLED);
-		else if (tcp_ecn_mode_pending(tp))
-			/* Downgrade from AccECN, or requested initially */
+		else
 			tcp_ecn_mode_set(tp, TCP_ECN_MODE_RFC3168);
 		break;
-	default:
-		tcp_ecn_mode_set(tp, TCP_ECN_MODE_ACCECN);
-		tp->syn_ect_rcv = ip_dsfield & INET_ECN_MASK;
-		if (tp->rx_opt.accecn &&
-		    tp->saw_accecn_opt < TCP_ACCECN_OPT_COUNTER_SEEN) {
-			u8 saw_opt = tcp_accecn_option_init(skb,
-							    tp->rx_opt.accecn);
-
-			tp->saw_accecn_opt = saw_opt;
-			if (tp->saw_accecn_opt == TCP_ACCECN_OPT_FAIL_SEEN) {
-				u8 fail_mode = TCP_ACCECN_OPT_FAIL_RECV;
-
-				tcp_accecn_fail_mode_set(tp, fail_mode);
+	case 0x5:
+		if (tcp_ecn_mode_pending(tp)) {
+			tcp_ecn_rcv_synack_accecn(tp, skb, ip_dsfield);
+			if (INET_ECN_is_ce(ip_dsfield)) {
+				tp->received_ce++;
+				tp->received_ce_pending++;
 			}
-			tp->accecn_opt_demand = 2;
 		}
+		break;
+	default:
+		tcp_ecn_rcv_synack_accecn(tp, skb, ip_dsfield);
 		if (INET_ECN_is_ce(ip_dsfield) &&
 		    tcp_accecn_validate_syn_feedback(sk, ace,
 						     tp->syn_ect_snt)) {
